@@ -1,4 +1,4 @@
-package goquerystore
+package querystore
 
 import (
 	"bufio"
@@ -9,41 +9,20 @@ import (
 )
 
 type QueryStore struct {
-	Store     map[string]string
-	FileCount int
-	FileNames []string
+	store map[string]string
 }
 
 func (q *QueryStore) Get(key string) string {
-	return q.Store[key]
+	return q.store[key]
 }
+
+const (
+	prefix = "querykey:"
+)
 
 type fileContents struct {
 	named    string
 	contents string
-}
-
-func fileMap(files []string, cs chan fileContents) {
-	defer close(cs)
-	for _, file := range files {
-		f, err := os.Open(file)
-		if err != nil {
-			fmt.Println(err)
-			return
-		}
-		defer f.Close()
-		scanner := bufio.NewScanner(f)
-		o, ok := getOpening(scanner)
-		if !ok {
-			continue
-		}
-		n, ok := getNamed(o)
-		if !ok {
-			continue
-		}
-		c := getRemaining(scanner)
-		cs <- fileContents{named: n, contents: c}
-	}
 }
 
 func New(directory string) (*QueryStore, error) {
@@ -68,31 +47,45 @@ func New(directory string) (*QueryStore, error) {
 	}
 
 	file := &QueryStore{}
-	file.Store = m
-	file.FileCount = len(m)
-	file.FileNames = files
+	file.store = m
 	return file, nil
 }
 
-func getOpening(scanner *bufio.Scanner) (string, bool) {
-	if scanner.Scan() {
-		return scanner.Text(), true
-	} else {
-		return "", false
+func fileMap(files []string, cs chan fileContents) {
+	defer close(cs)
+	for _, file := range files {
+		f, err := os.Open(file)
+		if err != nil {
+			return
+		}
+		defer f.Close()
+		scanner := bufio.NewScanner(f)
+		fL, cont, err := getContents(scanner)
+		if err != nil {
+			return
+		}
+		named, ok := getNamedKey(fL)
+		if !ok {
+			continue
+		}
+		cs <- fileContents{named: named, contents: cont}
 	}
 }
 
-func getRemaining(scanner *bufio.Scanner) string {
+func getContents(scanner *bufio.Scanner) (string, string, error) {
+	var fL string
 	var rem string
 	for scanner.Scan() {
+		if fL == "" {
+			fL = scanner.Text()
+			continue
+		}
 		rem += scanner.Text() + "\n"
 	}
-	return rem
+	return fL, rem, nil
 }
 
-const prefix = "querykey:"
-
-func getNamed(line string) (string, bool) {
+func getNamedKey(line string) (string, bool) {
 	is := strings.Split(line, " ")
 	for _, i := range is {
 		if strings.HasPrefix(i, prefix) {
