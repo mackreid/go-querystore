@@ -8,17 +8,22 @@ import (
 	"strings"
 )
 
-type FileKeyStore struct {
+type QueryStore struct {
 	Store     map[string]string
 	FileCount int
+	FileNames []string
 }
 
-type result struct {
+func (q *QueryStore) Get(key string) string {
+	return q.Store[key]
+}
+
+type fileContents struct {
 	named    string
 	contents string
 }
 
-func fileMap(files []string, cs chan result) {
+func fileMap(files []string, cs chan fileContents) {
 	defer close(cs)
 	for _, file := range files {
 		f, err := os.Open(file)
@@ -37,11 +42,11 @@ func fileMap(files []string, cs chan result) {
 			continue
 		}
 		c := getRemaining(scanner)
-		cs <- result{named: n, contents: c}
+		cs <- fileContents{named: n, contents: c}
 	}
 }
 
-func (f *FileKeyStore) Load(directory string) error {
+func New(directory string) (*QueryStore, error) {
 	files := []string{}
 	err := filepath.Walk(directory, func(path string, f os.FileInfo, err error) error {
 		if filepath.Ext(path) == ".sql" {
@@ -50,21 +55,23 @@ func (f *FileKeyStore) Load(directory string) error {
 		return nil
 	})
 	if err != nil {
-		return err
+		return nil, err
 	}
-	cs := make(chan result)
+	cs := make(chan fileContents)
 	go fileMap(files, cs)
 	m := make(map[string]string)
 	for res := range cs {
 		if _, ok := m[res.named]; ok {
-			return fmt.Errorf("keys cannot be duplicate: %s", res.named)
+			return nil, fmt.Errorf("keys cannot be duplicate: %s", res.named)
 		}
 		m[res.named] = res.contents
 	}
 
-	f.Store = m
-	f.FileCount = len(m)
-	return nil
+	file := &QueryStore{}
+	file.Store = m
+	file.FileCount = len(m)
+	file.FileNames = files
+	return file, nil
 }
 
 func getOpening(scanner *bufio.Scanner) (string, bool) {
